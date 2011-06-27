@@ -5,7 +5,7 @@
 
 #include <v8.h>
 #include <node.h>
-#include <hdfs.h>
+#include "../vendor/hdfs.h"
 
 using namespace node;
 using namespace v8;

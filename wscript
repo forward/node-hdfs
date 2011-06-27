@@ -7,6 +7,8 @@ def configure(conf):
 
 def build(bld):
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
-  obj.cxxflags = ["-g", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE", "-Wall"]
+  obj.env.append_value('CPPPATH', './vendor') 
+  obj.cxxflags = ["-g", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE", "-Wall", "-I/usr/lib/jvm/java-6-sun/include", "-I/usr/lib/jvm/java-6-sun/include/linux"]
   obj.target = "hdfs"
   obj.source = "src/hdfs.cc"
+  obj.uselib = ['LIBJVM', 'LIBHDFS']
