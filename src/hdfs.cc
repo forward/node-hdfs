@@ -52,6 +52,7 @@ public:
   static Handle<Value> Hello(const Arguments& args)
   {
     HandleScope scope;
+    
     HelloWorld* hw = ObjectWrap::Unwrap<HelloWorld>(args.This());
     hw->m_count++;
     Local<String> result = String::New("Hello World");
