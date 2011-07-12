@@ -28,7 +28,7 @@ public:
     s_ct->InstanceTemplate()->SetInternalFieldCount(1);
     s_ct->SetClassName(String::NewSymbol("Hdfs"));
 
-    NODE_SET_PROTOTYPE_METHOD(s_ct, "hello", Hello);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "write", Write);
 
     target->Set(String::NewSymbol("Hdfs"), s_ct->GetFunction());
   }
@@ -50,7 +50,7 @@ public:
     return args.This();
   }
 
-  static Handle<Value> Hello(const Arguments& args)
+  static Handle<Value> Write(const Arguments& args)
   {
     HandleScope scope;
     
@@ -59,24 +59,17 @@ public:
     char* writePath = (char *) malloc(strlen(*pathStr) + 1);
     strcpy(writePath, *pathStr);
     
-    // Handle<Buffer> bufArg = Buffer::Value(args[1]);
     char* bufData = Buffer::Data(args[1]->ToObject());
     size_t bufLength = Buffer::Length(args[1]->ToObject());
     
-    // v8::String::Utf8Value bufferStr(args[1]);
-    // char* buffer = (char *) malloc(strlen(*bufferStr) + 1);
-    // strcpy(buffer, *bufferStr);
-    
-    // const char* writePath = "/tmp/testfile.txt";
     hdfsFile writeFile = hdfsOpenFile(fs, writePath, O_WRONLY|O_CREAT, 0, 0, 0);
-    // char* buffer = "Hello, World!";
     tSize num_written_bytes = hdfsWrite(fs, writeFile, (void*)bufData, bufLength);
     hdfsFlush(fs, writeFile);
     hdfsCloseFile(fs, writeFile);
     
     HdfsClient* hw = ObjectWrap::Unwrap<HdfsClient>(args.This());
     hw->m_count++;
-    Local<String> result = String::New("Hello World");
+    Local<Integer> result = Integer::New(num_written_bytes);
 
     return scope.Close(result);
   }
