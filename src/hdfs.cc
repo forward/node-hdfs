@@ -11,7 +11,7 @@
 using namespace node;
 using namespace v8;
 
-class HelloWorld: ObjectWrap
+class HdfsClient: ObjectWrap
 {
 private:
   int m_count;
@@ -33,19 +33,19 @@ public:
     target->Set(String::NewSymbol("Hdfs"), s_ct->GetFunction());
   }
 
-  HelloWorld() :
+  HdfsClient() :
     m_count(0)
   {
   }
 
-  ~HelloWorld()
+  ~HdfsClient()
   {
   }
 
   static Handle<Value> New(const Arguments& args)
   {
     HandleScope scope;
-    HelloWorld* hw = new HelloWorld();
+    HdfsClient* hw = new HdfsClient();
     hw->Wrap(args.This());
     return args.This();
   }
@@ -74,7 +74,7 @@ public:
     hdfsFlush(fs, writeFile);
     hdfsCloseFile(fs, writeFile);
     
-    HelloWorld* hw = ObjectWrap::Unwrap<HelloWorld>(args.This());
+    HdfsClient* hw = ObjectWrap::Unwrap<HdfsClient>(args.This());
     hw->m_count++;
     Local<String> result = String::New("Hello World");
 
@@ -83,12 +83,12 @@ public:
 
 };
 
-Persistent<FunctionTemplate> HelloWorld::s_ct;
+Persistent<FunctionTemplate> HdfsClient::s_ct;
 
 extern "C" {
   static void init (Handle<Object> target)
   {
-    HelloWorld::Init(target);
+    HdfsClient::Init(target);
   }
 
   NODE_MODULE(hdfs, init);
