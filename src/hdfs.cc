@@ -35,6 +35,7 @@ public:
     s_ct->SetClassName(String::NewSymbol("Hdfs"));
 
     NODE_SET_PROTOTYPE_METHOD(s_ct, "write", Write);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "read", Read);
 
     target->Set(String::NewSymbol("Hdfs"), s_ct->GetFunction());
   }
@@ -63,7 +64,83 @@ public:
     Persistent<Function> cb;
     Persistent<Object> buffer;
   };
+  
+  struct hdfs_read_baton_t {
+    HdfsClient *client;
+    char *filePath;
+    Persistent<Function> cb;
+    Persistent<Object> buffer;
+  };
 
+  static Handle<Value> Read(const Arguments& args)
+  {
+    HandleScope scope;
+    
+    REQ_FUN_ARG(1, cb);
+
+    v8::String::Utf8Value pathStr(args[0]);
+    char* writePath = (char *) malloc(strlen(*pathStr) + 1);
+    strcpy(writePath, *pathStr);
+    
+    HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
+    
+    hdfs_read_baton_t *baton = new hdfs_read_baton_t();
+    baton->client = client;
+    baton->cb = Persistent<Function>::New(cb);
+    baton->filePath = writePath;
+    
+    client->Ref();
+    
+    eio_custom(eio_hdfs_read, EIO_PRI_DEFAULT, eio_after_hdfs_read, baton);
+    uv_ref();
+    
+    return Undefined();    
+  }
+  
+  static int eio_hdfs_read(eio_req *req)
+  {
+    hdfs_read_baton_t *baton = static_cast<hdfs_read_baton_t*>(req->data);
+    char* readPath = baton->filePath;
+    
+    hdfsFS fs = hdfsConnect("default", 0);
+    hdfsFile readFile = hdfsOpenFile(fs, readPath, O_RDONLY, 0, 0, 0);
+    int bytesAvailable = hdfsAvailable(fs, readFile);
+    char *buf = (char*)malloc(sizeof(char) * bytesAvailable + 1);
+    memset(buf, 0, bytesAvailable + 1);
+    
+    int readBytes = hdfsRead(fs, readFile, (void*)buf, bytesAvailable);
+    
+    Buffer* buffer = Buffer::New(buf, bytesAvailable);
+    baton->buffer = buffer->handle_;
+
+    hdfsCloseFile(fs, readFile);
+    
+    return 0;
+  }
+  
+  static int eio_after_hdfs_read(eio_req *req)
+  {
+    HandleScope scope;
+    hdfs_read_baton_t *baton = static_cast<hdfs_read_baton_t*>(req->data);
+    uv_unref();
+    baton->client->Unref();
+
+    Handle<Value> argv[1];
+    argv[0] = Local<Value>::New(baton->buffer);
+
+    TryCatch try_catch;
+    baton->cb->Call(Context::GetCurrent()->Global(), 1, argv);
+
+    if (try_catch.HasCaught()) {
+      FatalException(try_catch);
+    }
+    
+    baton->cb.Dispose();
+    
+    delete baton;
+    return 0;
+  }
+  
   static Handle<Value> Write(const Arguments& args)
   {
     HandleScope scope;
@@ -74,7 +151,6 @@ public:
     char* writePath = (char *) malloc(strlen(*pathStr) + 1);
     strcpy(writePath, *pathStr);
 
-    
     HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
     
     hdfs_write_baton_t *baton = new hdfs_write_baton_t();
