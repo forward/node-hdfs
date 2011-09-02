@@ -79,15 +79,15 @@ public:
     REQ_FUN_ARG(1, cb);
 
     v8::String::Utf8Value pathStr(args[0]);
-    char* writePath = (char *) malloc(strlen(*pathStr) + 1);
-    strcpy(writePath, *pathStr);
+    char* readPath = new char[strlen(*pathStr) + 1];
+    strcpy(readPath, *pathStr);
     
     HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
     
     hdfs_read_baton_t *baton = new hdfs_read_baton_t();
     baton->client = client;
     baton->cb = Persistent<Function>::New(cb);
-    baton->filePath = writePath;
+    baton->filePath = readPath;
     
     client->Ref();
     
@@ -105,7 +105,7 @@ public:
     hdfsFS fs = hdfsConnect("default", 0);
     hdfsFile readFile = hdfsOpenFile(fs, readPath, O_RDONLY, 0, 0, 0);
     int bytesAvailable = hdfsAvailable(fs, readFile);
-    char *buf = (char*)malloc(sizeof(char) * bytesAvailable + 1);
+    char *buf = new char[bytesAvailable + 1];
     memset(buf, 0, bytesAvailable + 1);
     
     int readBytes = hdfsRead(fs, readFile, (void*)buf, bytesAvailable);
