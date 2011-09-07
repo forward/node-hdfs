@@ -1,2 +1,6 @@
 build/
 .lock-wscript
+hdfs_bindings.node
+hadoop_cluster.xml
+core-site.xml
+

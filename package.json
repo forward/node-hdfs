@@ -1,0 +1,14 @@
+{ "name": "node-hdfs",
+  "version": "0.0.1",
+  "author": "Forward",
+  "contributors": [
+    { "name": "Paul Ingles", "email": "paul@forward.co.uk"},
+    { "name": "Horaci Cuevas", "email": "horaci@forward.co.uk" }
+  ]
+  "description": "A node module for accessing Hadoop's file system (HDFS)",
+  "scripts": { "preinstall": "node-waf configure build" },
+  "main": "./node-hdfs",
+  "engines": { "node": ">0.4.11" },
+  "keywords": [ "hdfs", "hadoop", "fs", "libhdfs" ],
+  "repository": { "type": "git", "url": "http://github.com/forward/node-hdfs.git" }
+}

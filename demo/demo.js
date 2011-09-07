@@ -1,25 +1,39 @@
-var h = require('../build/default/hdfs.node');
-var hi = new h.Hdfs();
-var data = new Buffer("Hello, my name is Paul. This is an example of what to do.", encoding='utf8')
+var sys = require('sys')
+  , HDFS = require('../node-hdfs')
 
-var writtenBytes = hi.write("/tmp/testfile.txt", data, function(bytes) {
-  console.log("Wrote file with " + bytes + " bytes.\n")
-  console.log("About to start reading byes...")
-  
-  hi.read("/tmp/testfile.txt", function(data) {
-    console.log("Data was: " + data)
-  })
+var hdfs = new HDFS({host:"default", port:0});
 
-  console.log("Finished asking to read byes...")
+var hdfs_file_path = "/tmp/test.txt"
+var local_out_path = "/tmp/test.out";
+
+// Stat File
+hdfs.stat(hdfs_file_path, function(err, data) {
+  if(!err) {
+    console.log("File stat of '" + data.path + "' is: " + JSON.stringify(data)); 
+    // => {"type":"file","path":"/tmp/test","size":183,"replication":1,"block_size":33554432,"owner":"horaci","group":"wheel","permissions":420,"last_mod":1315326370,"last_access":0}
+  }
 })
-console.log("Finished outer write\n")
 
-// console.log("Wrote " + writtenBytes + " bytes")
+// Read file
+hdfs.read(hdfs_file_path, 1024*1024, function(reader) {
+  var readed = 0;
+  reader.on("open", function(handle) {
+    console.log("File " + hdfs_file_path + " opened.")
+  });
+  reader.on("data", function(data) {
+    readed += data.length;
+    console.log("readed " + data.length + " bytes (" + readed +")");
+  });
+  reader.on("end", function(err) {
+    if(!err) {
+      console.log("Finished reading data - Total readed: " + readed);
+    }
+  });
+})
 
-
-// hi.openForWriting("/tmp/tetfile.txt", function(f) {
-//   f.write(buffer, function(bytes) {
-//     console.log("I just wrote some bytes");
-//   })
-// })
-// 
+// Copy file to local fs (in parallel with previous read file)
+hdfs.copyToLocalPath(hdfs_file_path, local_out_path, function(err, readed) {
+  if(!err) {
+    console.log(readed + " bytes copied from " +  hdfs_file_path + " to " + local_out_path);
+  }
+})
