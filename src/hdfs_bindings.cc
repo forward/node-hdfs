@@ -46,6 +46,7 @@ public:
     NODE_SET_PROTOTYPE_METHOD(s_ct, "stat", Stat);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "open", Open);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "close", Close);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "disconnect", Disconnect);
 
     target->Set(String::NewSymbol("Hdfs"), s_ct->GetFunction());
   }
@@ -54,9 +55,9 @@ public:
   {
     m_count = 0;
     fs_ = NULL;
-    fh_ = (hdfsFile_internal **) calloc(1024, sizeof(hdfsFile_internal *));
-    memset(fh_, 0, sizeof(fh_));
     fh_count_ = 1024;
+    fh_ = (hdfsFile_internal **) calloc(fh_count_, sizeof(hdfsFile_internal *));
+    memset(fh_, 0, sizeof(fh_count_ * sizeof(hdfsFile_internal **)));
   }
 
   ~HdfsClient()
@@ -82,12 +83,11 @@ public:
 
   struct hdfs_write_baton_t {
     HdfsClient *client;
-    char* filePath;
-    tSize writtenBytes;
+    char *buffer;
+    int bufferLength;
+    hdfsFile_internal *fileHandle;
     Persistent<Function> cb;
-    Persistent<Object> buffer;
-    Local<String> error;
-    hdfsFS fs;
+    tSize writtenBytes;
   };
 
   struct hdfs_read_baton_t {
@@ -111,6 +111,7 @@ public:
   struct hdfs_close_baton_t {
     HdfsClient *client;
     int fh;
+    hdfsFile_internal *fileHandle;
     Persistent<Function> cb;
   };
 
@@ -121,6 +122,13 @@ public:
     v8::String::Utf8Value hostStr(args[0]);
     client->fs_ = hdfsConnectNewInstance(*hostStr, args[1]->Int32Value());
     return Boolean::New(client->fs_ ? true : false);
+  }
+
+  static Handle<Value> Disconnect(const Arguments &args)
+  {
+    HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
+    hdfsDisconnect(client->fs_);
+    return Boolean::New(true);
   }
 
   static Handle<Value> Stat(const Arguments &args)
@@ -252,7 +260,11 @@ public:
   {
     // TODO: quick and dirty, totally inefficient!
     int fh = 0;
-    while(fh_[fh]) fh++;
+    while(fh < fh_count_ && fh_[fh]) {
+      fh++;
+
+    }
+    if(fh >= fh_count_) return -1;
     fh_[fh] = f;
     return fh;
   }
@@ -280,8 +292,13 @@ public:
     if(baton->fileHandle) {
       // create entry on global files
       int fh = baton->client->CreateFileHandle(baton->fileHandle);
-      argv[0] = Local<Value>::New(Undefined());
-      argv[1] = Local<Value>::New(Integer::New(fh));
+      if(fh >= 0) {
+        argv[0] = Local<Value>::New(Undefined());
+        argv[1] = Local<Value>::New(Integer::New(fh));
+      } else {
+        argv[0] = Local<Value>::New(String::New("Too many open files"));
+        argv[1] = Local<Value>::New(Undefined());
+      }
     } else {
       argv[0] = Local<Value>::New(String::New("File does not exist"));
       argv[1] = Local<Value>::New(Undefined());
@@ -317,6 +334,7 @@ public:
     baton->client = client;
     baton->cb = Persistent<Function>::New(cb);
     baton->fh = args[0]->Int32Value();
+    baton->fileHandle = client->GetFileHandle(baton->fh);
 
     client->Ref();
 
@@ -330,13 +348,7 @@ public:
   static int eio_hdfs_close(eio_req *req)
   {
     hdfs_close_baton_t *baton = static_cast<hdfs_close_baton_t*>(req->data);
-    hdfsFile_internal *hdfsfile = baton->client->GetFileHandle(baton->fh);
-
-    if(hdfsfile) {
-      hdfsCloseFile(baton->client->fs_, hdfsfile);
-      baton->client->RemoveFileHandle(baton->fh);
-    }
-
+    if(baton->fileHandle) hdfsCloseFile(baton->client->fs_, baton->fileHandle);
     return 0;
   }
 
@@ -347,6 +359,7 @@ public:
 
     ev_unref(EV_DEFAULT_UC);
     baton->client->Unref();
+    baton->client->RemoveFileHandle(baton->fh);
 
     TryCatch try_catch;
     baton->cb->Call(Context::GetCurrent()->Global(), 0, NULL);
@@ -362,19 +375,19 @@ public:
   }
 
   /**********************/
-  /* READ                */
+  /* READ               */
   /**********************/
 
   // handle, offset, bufferSize, callback
   static Handle<Value> Read(const Arguments &args)
   {
     HandleScope scope;
-
     REQ_FUN_ARG(3, cb);
 
     HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
 
     int fh = args[0]->Int32Value();
+
     hdfsFile_internal *fileHandle = client->GetFileHandle(fh);
 
     if(!fileHandle) {
@@ -431,24 +444,38 @@ public:
     return 0;
   }
 
+  /**********************/
+  /* WRITE              */
+  /**********************/
+
+  // write(fileHandleId, buffer, cb)
   static Handle<Value> Write(const Arguments& args)
   {
-    HandleScope scope;
 
+
+    HandleScope scope;
     REQ_FUN_ARG(2, cb);
 
-    v8::String::Utf8Value pathStr(args[0]);
-    char* writePath = (char *) malloc(strlen(*pathStr) + 1);
-    strcpy(writePath, *pathStr);
-
     HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
+    int fh = args[0]->Int32Value();
+    hdfsFile_internal *fileHandle = client->GetFileHandle(fh);
+
+    if(!fileHandle) {
+      return ThrowException(Exception::TypeError(String::New("Invalid file handle")));
+    }
+
+    Local<Object> obj = args[1]->ToObject();
+    int length = Buffer::Length(obj);
+    char *buffer = (char *) malloc(length * sizeof(char));
+    strncpy(buffer, Buffer::Data(obj), length);
 
     hdfs_write_baton_t *baton = new hdfs_write_baton_t();
     baton->client = client;
     baton->cb = Persistent<Function>::New(cb);
-    baton->buffer = Persistent<Object>::New(args[1]->ToObject());
+    baton->buffer = buffer;
+    baton->bufferLength = length;
+    baton->fileHandle = fileHandle;
     baton->writtenBytes = 0;
-    baton->filePath = writePath;
 
     client->Ref();
 
@@ -461,17 +488,9 @@ public:
   static int eio_hdfs_write(eio_req *req)
   {
     hdfs_write_baton_t *baton = static_cast<hdfs_write_baton_t*>(req->data);
-    char* writePath = baton->filePath;
 
-    char* bufData = Buffer::Data(baton->buffer);
-    size_t bufLength = Buffer::Length(baton->buffer);
-
-    hdfsFile_internal *writeFile = hdfsOpenFile(baton->client->fs_, writePath, O_WRONLY|O_CREAT, 0, 0, 0);
-    tSize num_written_bytes = hdfsWrite(baton->client->fs_, writeFile, (void*)bufData, bufLength);
-    hdfsFlush(baton->client->fs_, writeFile);
-    hdfsCloseFile(baton->client->fs_, writeFile);
-
-    baton->writtenBytes = num_written_bytes;
+    baton->writtenBytes = hdfsWrite(baton->client->fs_, baton->fileHandle, (void*)baton->buffer, baton->bufferLength);
+    hdfsFlush(baton->client->fs_, baton->fileHandle);
 
     return 0;
   }
@@ -480,20 +499,16 @@ public:
   {
     HandleScope scope;
     hdfs_write_baton_t *baton = static_cast<hdfs_write_baton_t*>(req->data);
+
     ev_unref(EV_DEFAULT_UC);
     baton->client->Unref();
 
-    Local<Value> argv[2];
-    if(baton->error == Undefined()) {
-      argv[0] = baton->error;
-    } else {
-      argv[0] = Local<Value>::New(Null());
-      argv[1] = Integer::New(baton->writtenBytes);
-    }
+    Local<Value> argv[1];
+    argv[0] = Integer::New(baton->writtenBytes);
 
     TryCatch try_catch;
 
-    baton->cb->Call(Context::GetCurrent()->Global(), 2, argv);
+    baton->cb->Call(Context::GetCurrent()->Global(), 1, argv);
 
     if (try_catch.HasCaught()) {
       FatalException(try_catch);
@@ -501,6 +516,7 @@ public:
 
     baton->cb.Dispose();
 
+    free(baton->buffer);
     delete baton;
     return 0;
   }
@@ -511,9 +527,9 @@ Persistent<FunctionTemplate> HdfsClient::s_ct;
 extern "C" {
   static void init (Handle<Object> target)
   {
-    // v8::ResourceConstraints rc;
-    // rc.set_stack_limit((uint32_t *)1);
-    // v8::SetResourceConstraints(&rc);
+    v8::ResourceConstraints rc;
+    rc.set_stack_limit((uint32_t *)1);
+    v8::SetResourceConstraints(&rc);
 
     HdfsClient::Init(target);
   }

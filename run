@@ -7,5 +7,5 @@ export CLASSPATH=$HADOOP_HOME/hadoop-core-0.20.2-cdh3u0.jar:$HADOOP_HOME/lib/com
 export CLASSPATH=$CLASSPATH::./conf
 node-waf clean
 node-waf configure
-node-waf build
+node-waf build 
 node demo/demo.js
