@@ -38,7 +38,7 @@ var readremote = function(cb) {
 // Copy file to local fs (in parallel with previous read file)
 var copylocal = function(cb) {
   var hdfs_file_path = "/tmp/test.txt"
-  var local_out_path = "/tmp/test.out";
+  var local_out_path = "/tmp/test_horaci.txt";
   hdfs.copyToLocalPath(hdfs_file_path, local_out_path, function(err, readed) {
     if(!err) {
       console.log(readed + " bytes copied from remote hdfs path " +  hdfs_file_path + " to local path " + local_out_path);
@@ -49,8 +49,8 @@ var copylocal = function(cb) {
 
 // Write to file to HDFS
 var copyremote = function(cb) {
-  var hdfs_out_path = "/tmp/test_horaci_out.txt";
   var local_file_path = "/tmp/test_horaci.txt";
+  var hdfs_out_path = "/tmp/test_horaci_out.txt";
 
   var start = new Date().getTime();
   hdfs.copyFromLocalPath(local_file_path, hdfs_out_path, function(err, written) {
