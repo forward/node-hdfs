@@ -211,11 +211,12 @@ var HDFSWritter = function(path) {
   }
 
   this.expandBuffer = function(buffer) {
-    buffer = buffer || new Buffer(0);
-    var newBuffer = new Buffer(self.writeBuffer.length + buffer.length);
-    self.writeBuffer.copy(newBuffer, 0, 0);
-    buffer.copy(newBuffer, self.writeBuffer.length, 0);
-    self.writeBuffer = newBuffer;
+    if(buffer) {
+      var newBuffer = new Buffer(self.writeBuffer.length + buffer.length);
+      self.writeBuffer.copy(newBuffer, 0, 0);
+      buffer.copy(newBuffer, self.writeBuffer.length, 0);
+      self.writeBuffer = newBuffer;
+    }
   }
 
   HDFS.open(path, modes.O_WRONLY | modes.O_CREAT, function(err, handle) {
