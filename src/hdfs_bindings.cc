@@ -260,10 +260,7 @@ public:
   {
     // TODO: quick and dirty, totally inefficient!
     int fh = 0;
-    while(fh < fh_count_ && fh_[fh]) {
-      fh++;
-
-    }
+    while(fh < fh_count_ && fh_[fh]) fh++;
     if(fh >= fh_count_) return -1;
     fh_[fh] = f;
     return fh;
@@ -290,7 +287,6 @@ public:
     Handle<Value> argv[2];
 
     if(baton->fileHandle) {
-      // create entry on global files
       int fh = baton->client->CreateFileHandle(baton->fileHandle);
       if(fh >= 0) {
         argv[0] = Local<Value>::New(Undefined());

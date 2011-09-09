@@ -1,0 +1,34 @@
+=== Requirements ===
+
+libhdfs must be compiled and installed in a path accessible by ldconfig (i.e. /usr/local/lib)
+
+== Mac OSX ==
+
+# cd [hadoop_uncompressed_src_path]/src/c++/libhdfs
+# chmod +x ./configure
+# ./configure
+
+To build libhdfs in Mac OSX a few changes need to be done in the generated 'Makefile' by './configure':
+
+* Search for a line that starts with 'CFLAGS = -g O2'
+** Remove the parameter "-m"
+** Add parameter "-framework JavaVM"
+
+* Search for a line that starts with 'DEFS = -DPACKAGE_NAME=\"libhdfs\" -DPACKAGE_TARNAME=\"libhdfs\"'
+** Remove the parameter "-Dsize_t=unsigned\ int"
+
+Comment or remove include in 'hdfsJniHelper.c' :
+
+* Search for '#include <error.h>'
+** Remove or comment the line
+
+Build the library
+
+# make
+# chmod +x ./install-sh
+# make install
+
+Copy the libraries to a folder accessible to the compiler or add it to the env with dyld (man dyld for more information).
+
+# cd [hadoop_uncompressed_src_path]/src/c++/install/lib
+# cp libhdfs* /usr/local/lib
