@@ -29,17 +29,16 @@ I (Paul) have had success with Cloudera's CDH distribution. Please see [their in
 
 To build libhdfs in Mac OSX a few changes need to be done in the generated 'Makefile' by './configure':
 
-* Edit Makefile and search for a line that starts with 'CFLAGS = -g O2'
-* Remove the parameter "-m"
-* Add parameter "-framework JavaVM"
+Edit Makefile and search for a line that starts with `'CFLAGS = -g O2'`
+* Remove the parameter `"-m"`
+* Add parameter `"-framework JavaVM"`
 
-* Search for a line that starts with 'DEFS = -DPACKAGE_NAME=\"libhdfs\" -DPACKAGE_TARNAME=\"libhdfs\"'
-* Remove the parameter "-Dsize_t=unsigned\ int"
+Search for a line that starts with `'DEFS = -DPACKAGE_NAME=\"libhdfs\" -DPACKAGE_TARNAME=\"libhdfs\"'`
+* Remove the parameter `"-Dsize_t=unsigned\ int"`
 
-Comment or remove include in 'hdfsJniHelper.c' :
+Comment or remove include in `'hdfsJniHelper.c'` :
 
-* Search for '#include <error.h>'
-* Remove or comment the line.
+Search for `'#include <error.h>'` and remove (or comment it out).
 
 Then build
 
