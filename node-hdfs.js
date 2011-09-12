@@ -35,6 +35,17 @@ module.exports = function(options) {
     this.connected = false;
   }
 
+  this.exists = function(path, cb) {
+    self.connect();
+    HDFS.exists(path, function(result) {
+      if(result==0) {
+        cb(null, true);
+      } else {
+        cb("file does not exist", false);
+      }
+    });
+  }
+
   this.stat = function(path, cb) {
     self.connect();
     HDFS.stat(path, cb);
@@ -85,10 +96,102 @@ module.exports = function(options) {
     return cb ? cb(reader) : reader;
   }
 
-  this.write = function(path, cb) {
+  this.write = function(path, mode, cb) {
+    if (!cb && typeof mode == "function") { cb = mode; mode = undefined; }
+    mode = mode || (modes.O_WRONLY | modes.O_CREAT)
     self.connect();
-    var writter = new HDFSWritter(path);
+    var writter = new HDFSWritter(path, mode);
     return cb ? cb(writter) : writter;
+  }
+
+  this.append = function(path, cb) {
+    return self.write(path, modes.O_WRONLY | modes.O_APPEND, cb)
+  }
+
+  this.mkdir = function(path,cb) {
+    self.connect();
+    self.exists(path, function(result) {
+      if(result != 0) {
+        HDFS.mkdir(path,function(result) {
+          if(result == 0) {
+            cb(null, true);
+          } else {
+            cb("Error creating directory", false);  // generic error :p
+          }
+        });
+      } else {
+        cb("File or directory already exists", false);
+      }
+    })
+  }
+
+  this.rm = function(path,options, cb) {
+    if (!cb && typeof options == "function") { cb = options; options = undefined; }
+    options = options || {recursive:false, force:false}
+    self.connect();
+
+    if(!options.force) {
+      var slashes = path.split("/");
+      if(slashes[0] != "") {
+        return(cb("cowardly refusing to delete relative path - set force to true in options to override", false));
+      }
+      if( slashes.length < 3 || (slashes.length == 3 && slashes[2] == "")) {
+        return(cb("cowardly refusing to delete root folder or first-level folder - set force to true in options to override", false));
+      }
+    }
+
+    var delete_file = function() {
+      HDFS.rm(path,function(result) {
+        if(result == 0) {
+          cb(null, true);
+        } else {
+          cb("Error deleting file", false);  // generic error :p
+        }
+      });
+    }
+
+    self.exists(path, function(err, result) {
+      if(!err && result) {
+        if(!options.recursive && !options.force) {
+          self.stat(path, function(err, data) {
+            if(err) {
+              cb("failed stating the path or file", false);
+            } else {
+              if(data.type == "directory") {
+                self.list(path, function(err, files) {
+                  if(files && files.length > 0) {
+                    cb("directory is not empty -- use recursive:true in options to force deletion", false);
+                  } else { // directory empty
+                    delete_file();
+                  }
+                });
+              } else { // not a directory
+                delete_file();
+              }
+            }
+          });
+        } else {  // recursive or force set
+          delete_file();
+        }
+      } else {
+        cb("File or directory does not exists", false);
+      }
+    })
+  }
+
+  // same as rm, but ensure path is a directory
+  this.rmdir = function(path, options, cb) {
+    if (!cb && typeof options == "function") { cb = options; options = undefined; }
+    options = options || {}
+    self.stat(path, function(err, data) {
+      if(err || !data) {
+        cb(err||"file not found", false);
+      } else if(data.type == "directory") {
+        self.rm(path, options, cb);
+      } else {
+        cb("not a directory", false);
+      }
+    })
   }
 
   this.copyToLocalPath = function(srcPath, dstPath, options, cb) {
@@ -178,12 +281,13 @@ var HDFSReader = function(path, bufferSize) {
 
 sys.inherits(HDFSReader, EventEmitter);
 
-var HDFSWritter = function(path) {
+var HDFSWritter = function(path, mode) {
   var self = this;
   this.handle = null;
   this.writting = false;
   this.closeCalled = false;
   this.writeBuffer = new Buffer(0);
+  mode = mode || (modes.O_WRONLY | modes.O_CREAT)
 
   this.write = function(buffer) {
     self.expandBuffer(buffer);
@@ -207,6 +311,7 @@ var HDFSWritter = function(path) {
     if(self.handle >= 0) {
       if(!self.writting && self.writeBuffer.length == 0) {
         HDFS.close(self.handle, function() {
+          self.handle = undefined;
           self.emit("close", err);
         })
       } else {
@@ -220,15 +325,18 @@ var HDFSWritter = function(path) {
 
   this.expandBuffer = function(buffer) {
     if(buffer) {
+      if(buffer.constructor.name != "Buffer") {
+        buffer = new Buffer(buffer.toString());
+      }
       var newBuffer = new Buffer(self.writeBuffer.length + buffer.length);
       self.writeBuffer.copy(newBuffer, 0, 0);
       buffer.copy(newBuffer, self.writeBuffer.length, 0);
       self.writeBuffer = newBuffer;
     }
   }
-
-  HDFS.open(path, modes.O_WRONLY | modes.O_CREAT, function(err, handle) {
-    if(err) {
+  
+  HDFS.open(path, mode, function(err, handle) {
+    if(err || !(handle >= 0)) {
       self.end(err);
     } else {
       self.handle = handle;

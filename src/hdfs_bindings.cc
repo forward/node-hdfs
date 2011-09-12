@@ -47,6 +47,9 @@ public:
     NODE_SET_PROTOTYPE_METHOD(s_ct, "open", Open);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "close", Close);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "list", List);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "mkdir", CreateDirectory);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "exists", Exists);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "rm", Delete);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "disconnect", Disconnect);
 
     target->Set(String::NewSymbol("Hdfs"), s_ct->GetFunction());
@@ -73,6 +76,13 @@ public:
     client->Wrap(args.This());
     return args.This();
   }
+
+  struct hdfs_path_baton_t {
+    HdfsClient *client;
+    char *filePath;
+    Persistent<Function> cb;
+    int result;
+  };
 
   struct hdfs_open_baton_t {
     HdfsClient *client;
@@ -139,6 +149,59 @@ public:
     hdfsDisconnect(client->fs_);
     return Boolean::New(true);
   }
+  
+  /**** GENERIC PATH OP ****/
+  static Handle<Value> genericPathOp(int (*op)(eio_req*), const Arguments &args)
+  {
+    HandleScope scope;
+    REQ_FUN_ARG(1, cb);
+
+    HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
+
+    v8::String::Utf8Value pathStr(args[0]);
+    char* filePath = new char[strlen(*pathStr) + 1];
+    strcpy(filePath, *pathStr);
+
+    hdfs_path_baton_t *baton = new hdfs_path_baton_t();
+    baton->client = client;
+    baton->cb = Persistent<Function>::New(cb);
+    baton->filePath = filePath;
+    baton->result = -1;
+
+    client->Ref();
+
+    eio_custom(op, EIO_PRI_DEFAULT, eio_after_hdfs_generic, baton);
+    ev_ref(EV_DEFAULT_UC);
+
+    return Undefined();
+  }
+
+  static int eio_after_hdfs_generic(eio_req *req)
+  {
+    HandleScope scope;
+    hdfs_path_baton_t *baton = static_cast<hdfs_path_baton_t*>(req->data);
+
+    ev_unref(EV_DEFAULT_UC);
+    baton->client->Unref();
+
+    Local<Value> argv[1];
+    argv[0] = Local<Value>::New(Integer::New(baton->result));
+
+    TryCatch try_catch;
+
+    baton->cb->Call(Context::GetCurrent()->Global(), 1, argv);
+
+    if (try_catch.HasCaught()) {
+      FatalException(try_catch);
+    }
+
+    baton->cb.Dispose();
+
+    free(baton->filePath);
+    delete baton;
+    return 0;
+  }
+  
 
   /*********** STAT **********/
 
@@ -531,8 +594,6 @@ public:
   // write(fileHandleId, buffer, cb)
   static Handle<Value> Write(const Arguments& args)
   {
-
-
     HandleScope scope;
     REQ_FUN_ARG(2, cb);
 
@@ -600,6 +661,50 @@ public:
     delete baton;
     return 0;
   }
+  
+  /*** Create Directory ***/
+  
+  static Handle<Value> CreateDirectory(const Arguments& args)
+  {
+    return genericPathOp(eio_hdfs_mkdir, args);
+  }
+
+  static int eio_hdfs_mkdir(eio_req *req)
+  {
+    hdfs_path_baton_t *baton = static_cast<hdfs_path_baton_t*>(req->data);
+    baton->result = hdfsCreateDirectory(baton->client->fs_, baton->filePath);
+    return 0;
+  }
+
+  /*** exists ***/
+  
+  static Handle<Value> Exists(const Arguments& args)
+  {
+    return genericPathOp(eio_hdfs_exists, args);
+  }
+
+  static int eio_hdfs_exists(eio_req *req)
+  {
+    hdfs_path_baton_t *baton = static_cast<hdfs_path_baton_t*>(req->data);
+    baton->result = hdfsExists(baton->client->fs_, baton->filePath);
+    return 0;
+  }
+
+  /*** delete ***/
+  
+  static Handle<Value> Delete(const Arguments& args)
+  {
+    return genericPathOp(eio_hdfs_delete, args);
+  }
+
+  static int eio_hdfs_delete(eio_req *req)
+  {
+    hdfs_path_baton_t *baton = static_cast<hdfs_path_baton_t*>(req->data);
+    baton->result = hdfsDelete(baton->client->fs_, baton->filePath);
+    return 0;
+  }
+
+
 };
 
 Persistent<FunctionTemplate> HdfsClient::s_ct;

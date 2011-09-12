@@ -10,7 +10,7 @@ libhdfs must be compiled and installed in a path accessible by ldconfig (i.e. /u
 
 To build libhdfs in Mac OSX a few changes need to be done in the generated 'Makefile' by './configure':
 
-* Search for a line that starts with 'CFLAGS = -g O2'
+* Edit Makefile and search for a line that starts with 'CFLAGS = -g O2'
 ** Remove the parameter "-m"
 ** Add parameter "-framework JavaVM"
 

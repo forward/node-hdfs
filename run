@@ -1,10 +1,14 @@
 export HADOOP_HOME=/usr/local/hadoop
 
 # Path to hadoop libs
-export CLASSPATH=$HADOOP_HOME/hadoop-core-0.20.2-cdh3u0.jar:$HADOOP_HOME/lib/commons-logging-1.0.4.jar
+# export CLASSPATH=$HADOOP_HOME/hadoop-core-0.20.2-cdh3u0.jar:$HADOOP_HOME/lib/commons-logging-1.0.4.jar
+
+# Alternate way without having to specify a version on hadoop-core:
+export CLASSPATH=$(for i in $HADOOP_HOME/hadoop-core*.jar ; do echo -n $i: ; done):$(for i in $HADOOP_HOME/lib/commons-logging*.jar ; do echo -n $i: ; done)
 
 # Add conf path where core-site.xml is
 export CLASSPATH=$CLASSPATH:./conf
+
 node-waf clean
 node-waf configure
 node-waf build 
