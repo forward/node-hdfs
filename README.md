@@ -7,9 +7,9 @@ This provides a JNI-implemented HDFS client allowing node.js applications to nat
 There's a run script that will build + run the `demo/demo.js` sample. 
 
     var HDFS = require('node-hdfs');
-    var c = new HDFS({host:"default", port:0});
+    var client = new HDFS({host:"default", port:0});
 
-    hdfs.list("/tmp/path", function(err, files) {
+    client.list("/tmp/path", function(err, files) {
       console.log(files);
     });
 
