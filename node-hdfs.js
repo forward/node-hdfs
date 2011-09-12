@@ -2,6 +2,7 @@ var sys          = require('sys')
   , fs           = require('fs')
   , EventEmitter = require('events').EventEmitter
   , HDFSBindings = require('./hdfs_bindings')
+  , url          = require('url')
 
 var HDFS = new HDFSBindings.Hdfs();
 
@@ -39,6 +40,34 @@ module.exports = function(options) {
     HDFS.stat(path, cb);
   }
 
+  this.list = function(path, options, cb) {
+    if (!cb && typeof options == "function") { cb = options; options = undefined; }
+    self.connect();
+
+    var pending = 0;
+
+    HDFS.list(path,function(err, files) {
+      if(!err) {
+        if(!(options && options.recursive)) return cb(err, files); // not recursive
+        for(i in files) {
+          if(files[i].type == "directory") {
+            var newPath = url.parse(files[i].path).pathname;
+            pending++;
+            self.list(newPath, options, function(newErr, newFiles) {
+              if(newErr) {
+                if(--pending == 0) cb(err, files);
+              } else {
+                files = files.concat(newFiles);
+                if(--pending == 0) cb(err, files);
+              }
+            });
+          }
+        }
+      }
+      if(pending == 0) cb(err, files);
+    });
+  }
+
   this.open = function(path, mode, cb) {
     self.connect();
     HDFS.open(path, mode, cb);
@@ -50,37 +79,28 @@ module.exports = function(options) {
   }
 
   this.read = function(path, bufferSize, cb) {
-    if (!cb || typeof cb != "function") {
-      cb = bufferSize;
-      bufferSize = 1024*1024;
-    }
-
+    if (!cb && typeof bufferSize == "function") { cb = bufferSize; bufferSize = undefined; }
     self.connect();
     var reader = new HDFSReader(path, bufferSize);
-    if(cb) {
-      cb(reader);
-    } else {
-      return reader;
-    }
+    return cb ? cb(reader) : reader;
   }
 
   this.write = function(path, cb) {
     self.connect();
     var writter = new HDFSWritter(path);
-    cb(writter);
+    return cb ? cb(writter) : writter;
   }
 
   this.copyToLocalPath = function(srcPath, dstPath, options, cb) {
-    if (!cb || typeof cb != "function") {
-      cb = options;
-      options = {encoding: null, mode:0666, flags: 'w'};
-    }
+    if (!cb && typeof options == "function") { cb = options; options = undefined; }
+    options = options || {encoding: null, mode:0666};
+    options.flags = 'w'; // force mode
+
     var stream = fs.createWriteStream(dstPath, options);
-    var readed = 0;
-    var bufferSize = options.bufferSize || 1024*1024; // 1mb chunks by default
 
     stream.once('open', function(fd) {
-      self.read(srcPath, bufferSize, function(rh) {
+      self.read(srcPath, function(rh) {
+        var readed = 0;
         rh.on('data', function(data) {
           stream.write(data);
           readed += data.length;
@@ -89,8 +109,8 @@ module.exports = function(options) {
           stream.end();
           cb(err, readed);
         });
-      })
-    })
+      });
+    });
   }
 
   this.copyFromLocalPath = function(srcPath, dstPath, options, cb) {
@@ -103,27 +123,15 @@ module.exports = function(options) {
       var written = 0;
       writter.once("open", function(handle) {
         var stream = fs.createReadStream(srcPath, options);
-
-        stream.on("data", function(data) {
-          writter.write(data);
-        });
-
-        stream.on("close", function() {
-          writter.end();
-        })
+        stream.on("data", function(data) { writter.write(data); });
+        stream.on("close", function() { writter.end();})
       });
 
-      writter.on("write", function(len) {
-        written += len;
-      });
-
-      writter.on("close", function(err) {
-        cb(err, written);
-      })
+      writter.on("write", function(len) { written += len; });
+      writter.on("close", function(err) { cb(err, written); })
     })
   }
 }
-
 
 var HDFSReader = function(path, bufferSize) {
   var self = this;

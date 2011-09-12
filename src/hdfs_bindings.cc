@@ -46,6 +46,7 @@ public:
     NODE_SET_PROTOTYPE_METHOD(s_ct, "stat", Stat);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "open", Open);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "close", Close);
+    NODE_SET_PROTOTYPE_METHOD(s_ct, "list", List);
     NODE_SET_PROTOTYPE_METHOD(s_ct, "disconnect", Disconnect);
 
     target->Set(String::NewSymbol("Hdfs"), s_ct->GetFunction());
@@ -108,6 +109,14 @@ public:
     Persistent<Function> cb;
   };
 
+  struct hdfs_list_baton_t {
+    HdfsClient *client;
+    char *filePath;
+    hdfsFileInfo *fileList;
+    int numEntries;
+    Persistent<Function> cb;
+  };
+
   struct hdfs_close_baton_t {
     HdfsClient *client;
     int fh;
@@ -130,6 +139,8 @@ public:
     hdfsDisconnect(client->fs_);
     return Boolean::New(true);
   }
+
+  /*********** STAT **********/
 
   static Handle<Value> Stat(const Arguments &args)
   {
@@ -174,26 +185,8 @@ public:
     Handle<Value> argv[2];
 
     if(baton->fileStat) {
-      Persistent<Object> statObject = Persistent<Object>::New(Object::New());;
-
-      char *path = baton->fileStat->mName;
-
-      char kind = (char)baton->fileStat->mKind;
-
-      statObject->Set(String::New("type"),        String::New(kind == 'F' ? "file" : kind == 'D' ? "directory" : "other"));
-      statObject->Set(String::New("path"),        String::New(path));
-      statObject->Set(String::New("size"),        Integer::New(baton->fileStat->mSize));
-      statObject->Set(String::New("replication"), Integer::New(baton->fileStat->mReplication));
-      statObject->Set(String::New("block_size"),  Integer::New(baton->fileStat->mBlockSize));
-      statObject->Set(String::New("owner"),       String::New(baton->fileStat->mOwner));
-      statObject->Set(String::New("group"),       String::New(baton->fileStat->mGroup));
-      statObject->Set(String::New("permissions"), Integer::New(baton->fileStat->mPermissions));
-      statObject->Set(String::New("last_mod"),    Integer::New(baton->fileStat->mLastMod));
-      statObject->Set(String::New("last_access"), Integer::New(baton->fileStat->mLastAccess));
-
       argv[0] = Local<Value>::New(Undefined());
-      argv[1] = Local<Value>::New(statObject);
-
+      argv[1] = Local<Value>::New(Persistent<Object>::New(baton->client->fileInfoToObject(baton->fileStat)));
       hdfsFreeFileInfo(baton->fileStat, 1);
     } else {
       argv[0] = Local<Value>::New(String::New("File does not exist"));
@@ -212,6 +205,97 @@ public:
     delete baton;
     return 0;
   }
+
+  Local<Object> fileInfoToObject(hdfsFileInfo *fileStat)
+  {
+    Local<Object> object = Local<Object>::New(Object::New());
+    char *path = fileStat->mName;
+    char kind = (char)fileStat->mKind;
+
+    object->Set(String::New("type"),        String::New(kind == 'F' ? "file" : kind == 'D' ? "directory" : "other"));
+    object->Set(String::New("path"),        String::New(path));
+    object->Set(String::New("size"),        Integer::New(fileStat->mSize));
+    object->Set(String::New("replication"), Integer::New(fileStat->mReplication));
+    object->Set(String::New("block_size"),  Integer::New(fileStat->mBlockSize));
+    object->Set(String::New("owner"),       String::New(fileStat->mOwner));
+    object->Set(String::New("group"),       String::New(fileStat->mGroup));
+    object->Set(String::New("permissions"), Integer::New(fileStat->mPermissions));
+    object->Set(String::New("last_mod"),    Integer::New(fileStat->mLastMod));
+    object->Set(String::New("last_access"), Integer::New(fileStat->mLastAccess));
+
+    return object;
+  }
+
+  /*********** List **********/
+  static Handle<Value> List(const Arguments &args)
+  {
+    HandleScope scope;
+
+    REQ_FUN_ARG(1, cb);
+
+    HdfsClient* client = ObjectWrap::Unwrap<HdfsClient>(args.This());
+
+    v8::String::Utf8Value pathStr(args[0]);
+    char* listPath = new char[strlen(*pathStr) + 1];
+    strcpy(listPath, *pathStr);
+
+    hdfs_list_baton_t *baton = new hdfs_list_baton_t();
+    baton->client = client;
+    baton->cb = Persistent<Function>::New(cb);
+    baton->filePath = listPath;
+    baton->fileList = NULL;
+
+    client->Ref();
+
+    eio_custom(eio_hdfs_list, EIO_PRI_DEFAULT, eio_after_hdfs_list, baton);
+    ev_ref(EV_DEFAULT_UC);
+
+    return Undefined();
+  }
+
+  static int eio_hdfs_list(eio_req *req)
+  {
+    hdfs_list_baton_t *baton = static_cast<hdfs_list_baton_t*>(req->data);
+    baton->fileList = hdfsListDirectory(baton->client->fs_, baton->filePath, &baton->numEntries);
+    return 0;
+  }
+
+  static int eio_after_hdfs_list(eio_req *req)
+  {
+    HandleScope scope;
+    hdfs_list_baton_t *baton = static_cast<hdfs_list_baton_t*>(req->data);
+    ev_unref(EV_DEFAULT_UC);
+    baton->client->Unref();
+
+    Handle<Value> argv[2];
+
+    if(baton->fileList) {
+      Local<Array> listArray = Array::New(baton->numEntries);
+
+      for(int i=0; i<baton->numEntries; i++) {
+        listArray->Set(Integer::New(i), baton->client->fileInfoToObject(&baton->fileList[i]));
+      }
+
+      argv[0] = Local<Value>::New(Undefined());
+      argv[1] = Local<Value>::New(listArray);
+      hdfsFreeFileInfo(baton->fileList, baton->numEntries);
+    } else {
+      argv[0] = Local<Value>::New(String::New("File does not exist"));
+      argv[1] = Local<Value>::New(Undefined());
+    }
+
+    TryCatch try_catch;
+    baton->cb->Call(Context::GetCurrent()->Global(), 2, argv);
+
+    if (try_catch.HasCaught()) {
+      FatalException(try_catch);
+    }
+
+    baton->cb.Dispose();
+    delete baton;
+    return 0;
+  }
+
 
 
   /**********************/
@@ -523,9 +607,9 @@ Persistent<FunctionTemplate> HdfsClient::s_ct;
 extern "C" {
   static void init (Handle<Object> target)
   {
-    v8::ResourceConstraints rc;
-    rc.set_stack_limit((uint32_t *)1);
-    v8::SetResourceConstraints(&rc);
+    // v8::ResourceConstraints rc;
+    // rc.set_stack_limit((uint32_t *)1);
+    // v8::SetResourceConstraints(&rc);
 
     HdfsClient::Init(target);
   }
