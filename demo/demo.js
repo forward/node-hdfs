@@ -1,4 +1,4 @@
-var sys = require('sys')
+var util = require('util')
   , HDFS = require('../node-hdfs');
 
 var hdfs = new HDFS({host:"default", port:0});
